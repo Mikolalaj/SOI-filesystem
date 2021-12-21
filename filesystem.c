@@ -290,7 +290,7 @@ int delete_file(char* disc_name, char* file_name)
     {
         shift_right(disc, sizeof(descriptor), sizeof(disc_info) + sizeof(descriptor), (info.f_count - 1) * sizeof(descriptor));
         info.f_count--;
-        info.free+=current.size;
+        info.free += current.size;
         fseek(disc, 0, SEEK_SET);
         fwrite(&info, sizeof(disc_info), 1, disc);
         fclose(disc);
@@ -302,15 +302,16 @@ int delete_file(char* disc_name, char* file_name)
         fread(&current, sizeof(descriptor), 1, disc);
         if (strcmp(current.name, file_name) == 0)
         {
-            shift_right(disc, sizeof(descriptor), sizeof(disc_info) + (i+1) * sizeof(descriptor), (info.f_count - i - 1) * sizeof(descriptor));
+            shift_right(disc, sizeof(descriptor), sizeof(disc_info) + (i+1) * sizeof(descriptor), (info.f_count - i-1) * sizeof(descriptor));
             info.f_count--;
-            info.free+=current.size;
+            info.free += current.size;
             fseek(disc, 0, SEEK_SET);
             fwrite(&info, sizeof(disc_info), 1, disc);
             fclose(disc);
             return 0;
         }
     }
+
     printf("File '%s' doesn't exist on disc '%s'.\n", file_name, disc_name);
     fclose(disc);
     return -1;
@@ -333,13 +334,13 @@ int ls(char* disc_name)
         return 0;
     }
 
-    printf("All files on disc '%s'", disc_name);
-    printf("\tFile Name\tBlocks\tBytes");
+    printf("All files on disc '%s':\n\n", disc_name);
+    printf("\tFile Name\tBlocks\tBytes\n");
     descriptor current;
     for (int i=0; i<info.f_count; i++)
     {
         fread(&current, sizeof(descriptor), 1, disc);
-        printf("%d.\t%s\t", (i+1), current.name);
+        printf("%d.\t%s\t\t", (i+1), current.name);
         printf("%d\t%d\n", current.size, (current.size)*BLOCK-current.free_bytes);
     }
     printf("\n");
@@ -349,15 +350,16 @@ int ls(char* disc_name)
 
 int info(char* disc_name)
 {
-    FILE* disc;
-    disc_info info;
-    disc = fopen(disc_name, "r+b");
+    FILE* disc = fopen(disc_name, "r+b");
     if (disc == NULL)
     {
         printf("Disc %s doesn't exist.\n", disc_name);
         return -1;
     }
+    
+    disc_info info;
     fread(&info, sizeof(disc_info), 1, disc);
+
     printf(
         "Number of descriptor blocks:\t%d\n"
         "Number of files saved on disc:\t%d\n"
@@ -389,7 +391,7 @@ void help()
 
 int reallocate(FILE* f)
 {
-    int nochange = 1;        //a priori let's assume that no changes was made
+    int nochange = 1; // a priori let's assume that no changes was made
     int shift;
     int position;
     fseek(f, 0, SEEK_SET);
@@ -405,7 +407,7 @@ int reallocate(FILE* f)
         current.adress = current.adress - shift;
         fseek(f, sizeof(disc_info), SEEK_SET);
         fwrite(&current, sizeof(descriptor), 1, f);
-        nochange =0;
+        nochange = 0;
     }
     prev = current;
     for(int i = 1; i < info.f_count; i++)
@@ -446,26 +448,31 @@ int add_descriptor_block(FILE* f) //add new descriptor block if necessary
     return 0;
 }
 
-int shift(FILE* f, int shift_, int offset, int size) // shift - distance in bytes to shift;
-{                                                    // offset - position of bytes to shift
-    if(size == 0) return 1;                          // size - number of bytes to shift
-    if(shift_ == 0) return 1;
-    char *buffer;
-    buffer = malloc(sizeof(char)*size);
-    fseek(f, offset, SEEK_SET);
-    fread(buffer, sizeof(char), size, f);
-    fseek(f, offset - shift_, SEEK_SET);
-    fwrite(buffer, sizeof(char), size, f);
+//shift_right(disc, sizeof(descriptor), sizeof(disc_info) + sizeof(descriptor), (info.f_count - 1) * sizeof(descriptor));
+int shift(FILE* file, int shift_, int offset, int size)
+{
+    /* shift_ - distance in bytes to shift
+       offset - position of bytes to shift
+       size - number of bytes to shift */
+    if (size == 0) return 1;
+    if (shift_ == 0) return 1;
+    char *buffer = malloc(sizeof(char)*size);
+
+    fseek(file, offset, SEEK_SET);
+    fread(buffer, sizeof(char), size, file);
+    fseek(file, offset - shift_, SEEK_SET);
+    fwrite(buffer, sizeof(char), size, file);
+
     free(buffer);
     return 0;
 }
 
-int shift_right(FILE* f, int shift_, int offset, int size)
+int shift_right(FILE* file, int shift_, int offset, int size)
 {
-    return shift(f, shift_, offset, size);
+    return shift(file, shift_, offset, size);
 }
 
-int shift_left(FILE* f, int shift_, int offset, int size)
+int shift_left(FILE* file, int shift_, int offset, int size)
 {
-    return shift(f, -shift_, offset, size);
+    return shift(file, -shift_, offset, size);
 }
