@@ -69,7 +69,6 @@ int upload(char* disc_name, char* file_name)
     {
         printf("File '%s' doesn't exist.\n", file_name);
         fclose(disc);
-        fclose(file);
         return -1;
     }
 
@@ -120,9 +119,11 @@ int upload(char* disc_name, char* file_name)
     
     if (info.f_count == 0)
     {
+        // read data from file to buffer
         fseek(file, 0, SEEK_SET);
         fread(buffer, sizeof(char), size_in_bytes, file);
 
+        // write data from buffer to disc
         fseek(disc, info.no_of_descriptor_blocks * BLOCK, SEEK_SET);
         fwrite(buffer, sizeof(char), size_in_bytes, disc);
 
@@ -135,11 +136,12 @@ int upload(char* disc_name, char* file_name)
         info.free -= desc.size;
 
         fseek(disc, 0, SEEK_SET);
-        fwrite(&info, sizeof(disc_info), 1, disc); // update information in descriptors' segment
+        fwrite(&info, sizeof(disc_info), 1, disc);
         fwrite(&desc, sizeof(descriptor), 1, disc);
         fclose(disc);
         fclose(file);
         free(buffer);
+
         return 0;
     }
 
@@ -147,14 +149,17 @@ int upload(char* disc_name, char* file_name)
     if (info.no_of_descriptor_blocks * BLOCK - info.f_count * sizeof(info) -
         sizeof(disc_info) - sizeof(info) < 0)
     {
+        // if there is not enough space for new descriptor block, return -1
         if (add_descriptor_block(disc) == -1)
         {
             printf("Lack of free space on disc '%s' for file descriptor.\n", disc_name);
             fclose(disc);
             fclose(file);
             free(buffer);
+            
             return -1;
         }
+        // if there is enough space for new descriptor, add it and update `info` struct
         else
         {
             fseek(disc, 0, SEEK_SET);
@@ -163,94 +168,96 @@ int upload(char* disc_name, char* file_name)
         }
     }
 
-    long int position;
+    // get descriptor of the last file
     fseek(disc, sizeof(disc_info) + (info.f_count - 1)*sizeof(descriptor), SEEK_SET);
-    fread(&desc, sizeof(descriptor), 1, disc); // load descriptor of last file
-    if ((info.size - (desc.adress + desc.size)) > size) //check whether is enough continuous space for file
-    {                                                   //if not - it's necessary to shift data
-        position = ftell(disc);
-        fseek(file, 0, SEEK_SET);
-        fread(buffer, sizeof(char), size_in_bytes, file);
-        fseek(disc, (desc.adress + desc.size) * BLOCK, SEEK_SET);
-        fwrite(buffer, sizeof(char), size_in_bytes, disc);
-        fseek(disc, position, SEEK_SET);
-        desc.adress = desc.adress + desc.size; //save information for file
-        desc.size = size;
-        strcpy(desc.name, file_name);
-        desc.free_bytes = free_bytes;
-        fwrite(&desc, sizeof(descriptor), 1, disc); //update information for file in descriptors' segment
-        info.f_count++;
-        info.free-=desc.size;
-        fseek(disc, 0, SEEK_SET);
-        fwrite(&info, sizeof(disc_info), 1, disc);
-        fclose(disc);
-        fclose(file);
-        free(buffer);
-        return 0;
+    fread(&desc, sizeof(descriptor), 1, disc);
+
+    // check if there is enough continuous space for file
+    if ((info.size - desc.adress - desc.size) > size)
+    {
+        return add_new_file(disc, file, buffer, size_in_bytes, size, free_bytes, file_name, info, desc);
     }
 
-    if (reallocate(disc) == 0) // earlier checked whether is enough space - now try to reallocate
+    // if there is not enough continous space, then it's necessary to shift data
+    if (reallocate(disc) == 0)
     {
         fseek(disc, 0, SEEK_SET);
         fread(&info, sizeof(disc_info), 1, disc);
         fseek(disc, sizeof(disc_info) + (info.f_count - 1) * sizeof(descriptor), SEEK_SET);
         fread(&desc, sizeof(descriptor), 1, disc); //read descriptor of last file
-        position = ftell(disc);
-        fseek(file, 0, SEEK_SET);
-        fread(buffer, sizeof(char), size_in_bytes, file);
-        fseek(disc, (desc.adress + desc.size) * BLOCK, SEEK_SET);
-        fwrite(buffer, sizeof(char), size_in_bytes, disc);
-        fseek(disc, position, SEEK_SET);
-        desc.adress = desc.adress + desc.size; //save information for file
-        desc.size = size;
-        strcpy(desc.name, file_name);
-        desc.free_bytes = free_bytes;
-        fwrite(&desc, sizeof(descriptor), 1, disc); //update information for file in descriptors' segment
-        info.f_count++;
-        info.free-=desc.size;
-        fseek(disc, 0, SEEK_SET);
-        fwrite(&info, sizeof(disc_info), 1, disc);
-        fclose(disc);
-        fclose(file);
-        free(buffer);
-        return 0;
+        return add_new_file(disc, file, buffer, size_in_bytes, size, free_bytes, file_name, info, desc);
     }
 
     fclose(disc);
     fclose(file);
     free(buffer);
-    printf("Error occurs. Try again.\n");
+
+    printf("Some unexpected errors occured. Try again.\n");
+    
     return -1;
+}
+
+int add_new_file(FILE* disc, FILE* file, char *buffer, long int size_in_bytes,
+                 long int size, int free_bytes, char* file_name, disc_info info, descriptor desc)
+{
+    // save position of last descriptor
+    long int position = ftell(disc);
+
+    // read data from file to buffer
+    fseek(file, 0, SEEK_SET);
+    fread(buffer, sizeof(char), size_in_bytes, file);
+
+    // write data from buffer to file
+    fseek(disc, (desc.adress + desc.size) * BLOCK, SEEK_SET);
+    fwrite(buffer, sizeof(char), size_in_bytes, disc);
+
+    fseek(disc, position, SEEK_SET);
+    desc.adress = desc.adress + desc.size;
+    desc.size = size;
+    strcpy(desc.name, file_name);
+    desc.free_bytes = free_bytes;
+    // save new file's descriptor to disc
+    fwrite(&desc, sizeof(descriptor), 1, disc);
+
+    info.f_count++;
+    info.free -= desc.size;
+    fseek(disc, 0, SEEK_SET);
+    fwrite(&info, sizeof(disc_info), 1, disc);
+
+    fclose(disc);
+    fclose(file);
+    free(buffer);
+
+    return 0;
 }
 
 int download(char* disc_name, char* file_name)
 {
-    FILE *disc, *file;
-    disc_info info;
-    descriptor current;
-    char* buffer;
-    int i;
-    disc = fopen(disc_name, "r+b");
+    FILE *disc = fopen(disc_name, "r+b");
+    if(disc == NULL)
+    {
+        printf("Disc '%s' doesn't exist.\n", disc_name);
+        return -1;
+    }
 
-    file = fopen(file_name, "r");        //check whether such file exists in local directory
+    FILE *file = fopen(file_name, "r");
     if(file != NULL)
     {
-        printf("File %s already exists in local directory.\n", file_name);
+        printf("File '%s' already exists in local directory.\n", file_name);
         fclose(disc);
         return -1;
     }
-    if(disc == NULL)
-    {
-        printf("Disc %s doesn't exist.\n", disc_name);
-        return -1;
-    }
+
+    disc_info info;
+    descriptor current;
+    
     fread(&info, sizeof(disc_info), 1, disc);
-    for(i = 0; i < info.f_count; i++)
+    for (int i=0; i<info.f_count; i++)
     {
         fread(&current, sizeof(descriptor), 1, disc);
-        if( strcmp(current.name, file_name) == 0)
+        if (strcmp(current.name, file_name) == 0)
         {
-            buffer = malloc (sizeof(char) * current.size * BLOCK - current.free_bytes);
+            char* buffer = malloc(sizeof(char) * current.size * BLOCK - current.free_bytes);
             fseek(disc, current.adress *BLOCK, SEEK_SET);
             fread(buffer, sizeof(char), current.size *BLOCK - current.free_bytes, disc);
             file = fopen(file_name, "wb");
@@ -260,26 +267,26 @@ int download(char* disc_name, char* file_name)
             return 0;
         }
     }
-    printf("File %s doesn't exist on disc %s.\n", file_name, disc_name);
+    printf("File '%s' doesn't exist on disc '%s'.\n", file_name, disc_name);
     fclose(disc);
     return 1;
 }
 
 int delete_file(char* disc_name, char* file_name)
 {
-    FILE* disc;
-    disc_info info;
-    descriptor current;
-    int i;
-    disc = fopen(disc_name, "r+b");
-    if(disc == NULL)
+    FILE* disc = fopen(disc_name, "r+b");
+    if (disc == NULL)
     {
-        printf("Disc %s doesn't exist.\n", disc_name);
+        printf("Disc '%s' doesn't exist.\n", disc_name);
         return -1;
     }
+
+    disc_info info;
     fread(&info, sizeof(disc_info), 1, disc);
+    descriptor current;
     fread(&current, sizeof(descriptor), 1, disc);
-    if( strcmp( current.name, file_name) == 0)        //check first file
+
+    if (strcmp(current.name, file_name) == 0) // check first file
     {
         shift_right(disc, sizeof(descriptor), sizeof(disc_info) + sizeof(descriptor), (info.f_count - 1) * sizeof(descriptor));
         info.f_count--;
@@ -289,10 +296,11 @@ int delete_file(char* disc_name, char* file_name)
         fclose(disc);
         return 0;
     }
-    for(i = 1; i < info.f_count; i++)
+
+    for (int i=1; i<info.f_count; i++)
     {
         fread(&current, sizeof(descriptor), 1, disc);
-        if( strcmp( current.name, file_name) == 0)
+        if (strcmp(current.name, file_name) == 0)
         {
             shift_right(disc, sizeof(descriptor), sizeof(disc_info) + (i+1) * sizeof(descriptor), (info.f_count - i - 1) * sizeof(descriptor));
             info.f_count--;
@@ -303,29 +311,36 @@ int delete_file(char* disc_name, char* file_name)
             return 0;
         }
     }
-    printf("File %s doesn't exist on disc %s.\n", file_name, disc_name);
+    printf("File '%s' doesn't exist on disc '%s'.\n", file_name, disc_name);
     fclose(disc);
     return -1;
 }
 
 int ls(char* disc_name)
 {
-    FILE *disc;
-    int i;
-    disc_info info;
-    descriptor current;
-    disc = fopen(disc_name, "r+b");
-    if(disc == NULL)
+    FILE *disc = fopen(disc_name, "r+b");
+    if (disc == NULL)
     {
-        printf("Disc %s doesn't exist.\n", disc_name);
+        printf("Disc '%s' doesn't exist.\n", disc_name);
         return -1;
     }
+
+    disc_info info;
     fread(&info, sizeof(disc_info), 1, disc);
-    for(i = 0; i < info.f_count; i++)
+    if (info.f_count == 0)
+    {
+        printf("There are no files on disc '%s'", disc_name);
+        return 0;
+    }
+
+    printf("All files on disc '%s'", disc_name);
+    printf("\tFile Name\tBlocks\tBytes");
+    descriptor current;
+    for (int i=0; i<info.f_count; i++)
     {
         fread(&current, sizeof(descriptor), 1, disc);
-        printf("%d. file's name:\t%s\t", (i+1), current.name);
-        printf("Size in blocks:\t%d\tSize in bytes:\t%d\n", current.size, (current.size)*BLOCK-current.free_bytes);
+        printf("%d.\t%s\t", (i+1), current.name);
+        printf("%d\t%d\n", current.size, (current.size)*BLOCK-current.free_bytes);
     }
     printf("\n");
     fclose(disc);
@@ -357,16 +372,16 @@ int info(char* disc_name)
 void help()
 {
     printf(
-    "First argument is always name of disc. All available commands below:\n"
-    "new \t\t<arg1> <arg2>\t\tCreate disc <arg1> of size <arg2>\n"
-    "delete \t\t<arg1>\t\t\tDelete disc <arg1> \n"
-    "upload \t\t<arg1> <arg2>\t\tCopy file <arg2> to disc <arg1>\n"
-    "download \t<arg1> <arg2>\t\tCopy file <arg2> from disc <arg2> to local user's folder\n"
-    "remove \t\t<arg1> <arg2>\t\tDelete file <arg2> from disc <arg1>\n"
-    "ls \t\t<arg1>\t\t\tShow list of files saved on disc <arg1>\n"
-    "info \t\t<arg1>\t\t\tCheck disc <arg1> condition\n"
-    "help \t\t\t\t\tDisplay help\n"
-    "quit \t\t\t\t\tFinish work with program\n\n"
+    "All available commands:\n\n"
+    "new          <arg1> <arg2>\tCreate disc <arg1> of size <arg2>\n"
+    "delete       <arg1>\t\tDelete disc <arg1> \n"
+    "upload       <arg1> <arg2>\tCopy file <arg2> to disc <arg1>\n"
+    "download     <arg1> <arg2>\tCopy file <arg2> from disc <arg2> to local user's folder\n"
+    "remove       <arg1> <arg2>\tDelete file <arg2> from disc <arg1>\n"
+    "ls           <arg1>\t\tShow list of files saved on disc <arg1>\n"
+    "info         <arg1>\t\tCheck disc <arg1> condition\n"
+    "help \t\t\t\tDisplay help\n"
+    "quit \t\t\t\tFinish work with program\n\n"
     );
     return;
 }

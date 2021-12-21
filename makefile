@@ -1,7 +1,7 @@
 OBJS	= main.o filesystem.o shell.o
 SOURCE	= main.c filesystem.c shell.c
 HEADER	= filesystem.h shell.h
-OUT	= filesystem.out
+OUT	= a.out
 CC	= gcc
 FLAGS	= -g -c -Wall
 LFLAGS	= 

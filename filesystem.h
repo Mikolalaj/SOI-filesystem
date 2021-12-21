@@ -26,9 +26,14 @@ struct descriptor
 
 int create_disc(char *disc_name, int size);
 int delete_disc(char *disc_name);
+
 int upload(char* disc_name, char* file_name);
+int add_new_file(FILE* disc, FILE* file, char *buffer, long int size_in_bytes,
+                 long int size, int free_bytes, char* file_name, struct disc_info info, struct descriptor desc);
 int download(char* disc_name, char* file_name);
+
 int delete_file(char* disc_name, char* file_name);
+
 int ls(char *disc_name);
 int info(char* disc_name);
 void help();
